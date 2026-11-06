@@ -67,7 +67,9 @@ wrangler.jsonc   # Cloudflare Workers 部署配置
 
 通过 Workers Static Assets 托管 `dist/`，不需要编写 Worker 服务端脚本。`wrangler.jsonc` 已配置 `not_found_handling: "single-page-application"`，前端路由直接访问和刷新会回退到 `index.html`。
 
-首次部署先登录 Cloudflare，再运行部署命令：
+Cloudflare Workers 已连接本仓库，`main` 分支有变更时会自动触发构建与部署，日常更新只需推送代码，无需手动操作。
+
+以下命令仅用于备用手动部署，运行前先登录 Cloudflare：
 
 ```bash
 npx wrangler login
@@ -76,7 +78,7 @@ npm run deploy
 
 `deploy` 会先执行构建，再使用 Wrangler 发布。Worker 名称默认为 `zoetrope-animated-demo`，可在 `wrangler.jsonc` 中修改。部署地址以 Wrangler 输出为准。
 
-如通过 Cloudflare Workers Builds 连接 Git 仓库：
+Cloudflare Workers Builds 的仓库构建配置：
 
 - 构建命令：`npm run build`
 - 部署命令：`npx wrangler deploy`

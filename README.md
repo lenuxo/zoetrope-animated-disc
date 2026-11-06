@@ -34,9 +34,9 @@ npm run dev
 | `npm run preview` | 预览构建产物 |
 | `npm run preview:cf` | 构建并在本地 Cloudflare 环境预览 |
 | `npm run deploy:check` | 构建并检查 Cloudflare 部署包 |
-| `npm run deploy` | 构建并发布到 Cloudflare Workers |
+| `npm run deploy` | 手动构建并发布（备用） |
 
-Cloudflare 首次部署前运行 `npx wrangler login`。部署配置见 `wrangler.jsonc`，已启用单页应用路由回退。
+Cloudflare Workers 已连接本仓库，`main` 分支有变更时会自动触发构建与部署，日常更新只需推送代码，无需手动操作。部署配置见 `wrangler.jsonc`，已启用单页应用路由回退。
 
 ## 项目结构
 
