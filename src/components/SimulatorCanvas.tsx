@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDrag } from '@use-gesture/react'
 import { angularDelta, FixedRateSchedule } from '../simulation/model'
 import type { RotationModel, Transport } from '../simulation/model'
-import { createCompositePlate, createPlate, renderExposure } from '../simulation/render'
+import { PlateTextureCache, renderExposure } from '../simulation/render'
 import type { PlateGeometry, PlateMaterial } from '../simulation/plate'
 import type { RingLayer } from '../simulation/rings'
 
@@ -12,6 +12,7 @@ export type ViewMode = 'continuous' | 'camera'
 export type FrameInfo = { time: number; sample: number; sampleTime: number; angle: number; exposureSamples: number }
 
 type Props = {
+  active: boolean
   layout: PreviewLayout
   mode: ViewMode
   playing: boolean
@@ -28,23 +29,24 @@ type Props = {
   material: PlateMaterial
   geometry: PlateGeometry
   rings?: RingLayer[]
-  observationTarget?: { key: string; name: string; radius: number }
+  observationName?: string
+  radius: number
+  onRadiusChange: (radius: number) => void
 }
 
-export function SimulatorCanvas({ layout, mode, playing, fps, exposure, blur, guides, zoom, revision, transport, motion, onFrame, onRotate, material, geometry, rings, observationTarget }: Props) {
+export function SimulatorCanvas({ active, layout, mode, playing, fps, exposure, blur, guides, zoom, revision, transport, motion, onFrame, onRotate, material, geometry, rings, observationName, radius, onRadiusChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const previousAngle = useRef<number | null>(null)
   const [scratching, setScratching] = useState(false)
   const [observationSize, setObservationSize] = useState({ width: 0.24, height: 0.12 })
-  const radius = observationTarget?.radius ?? 75
   const centerY = 0.5 - (292 / 600) * radius / 100
   const observation = useMemo(() => {
     const height = Math.min(observationSize.height, 2 * Math.min(centerY, 1 - centerY))
     return { x: 0.5 - observationSize.width / 2, y: centerY - height / 2, width: observationSize.width, height }
   }, [observationSize, centerY])
   const lensRef = useRef<HTMLCanvasElement>(null)
-  const platesRef = useRef<{ material: PlateMaterial; geometry: PlateGeometry; rings?: RingLayer[]; images: HTMLCanvasElement[] } | null>(null)
+  const [textures] = useState(() => new PlateTextureCache())
 
   const bind = useDrag(({ first, last, active, canceled, cancel, initial, xy: [x, y] }) => {
     if (canceled) { previousAngle.current = null; setScratching(false); return }
@@ -73,10 +75,8 @@ export function SimulatorCanvas({ layout, mode, playing, fps, exposure, blur, gu
   }, { enabled: !playing, preventDefault: true, pointer: { capture: true, keys: false } })
 
   useEffect(() => {
-    if (!platesRef.current || platesRef.current.material !== material || platesRef.current.geometry !== geometry || platesRef.current.rings !== rings) {
-      platesRef.current = { material, geometry, rings, images: rings ? [createCompositePlate(rings), createCompositePlate(rings, true)] : [createPlate(material, geometry), createPlate(material, geometry, true)] }
-    }
-    const plate = platesRef.current.images[guides ? 1 : 0]
+    if (!active) return
+    const plate = textures.get(material, geometry, rings, guides)
     const canvas = canvasRef.current!
     const ctx = canvas.getContext('2d')!
     const lens = lensRef.current!.getContext('2d')!
@@ -111,7 +111,7 @@ export function SimulatorCanvas({ layout, mode, playing, fps, exposure, blur, gu
     }
     draw(performance.now())
     return () => cancelAnimationFrame(request)
-  }, [mode, playing, fps, exposure, blur, guides, revision, transport, motion, onFrame, observation, material, geometry, rings])
+  }, [active, textures, mode, playing, fps, exposure, blur, guides, revision, transport, motion, onFrame, observation, material, geometry, rings])
 
   return (
     <div className="canvas-workspace">
@@ -120,15 +120,15 @@ export function SimulatorCanvas({ layout, mode, playing, fps, exposure, blur, gu
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-4 pt-5 sm:px-6">
           <div>
             <h2 id="observation-title" className="text-base font-semibold">观察监视器</h2>
-            <p className="mt-1 text-xs text-muted-foreground">{observationTarget ? `当前观察：${observationTarget.name}` : '固定位置 · 与盘面同源采样'}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{observationName ? `${observationName} · 半径 ${radius}%` : `半径 ${radius}% · 与盘面同源采样`}</p>
           </div>
           <span className="observation-mode">{mode === 'camera' ? '相机采样' : '连续旋转'}</span>
         </div>
         <div className="observation-stage">
-          <canvas ref={lensRef} width="960" height={Math.round(960 * observation.height / observation.width)} data-testid="observation-canvas" className="observation-image" style={{ width: `min(100cqw, ${100 * observation.width / observation.height}cqh)`, height: `min(100cqh, ${100 * observation.height / observation.width}cqw)` }} role="img" aria-label="唱片顶部固定位置的放大观察窗" />
+          <canvas ref={lensRef} width={Math.round(960 * Math.min(1, observation.width / observation.height))} height={Math.round(960 * Math.min(1, observation.height / observation.width))} data-testid="observation-canvas" className="observation-image" style={{ width: `min(100cqw, ${100 * observation.width / observation.height}cqh)`, height: `min(100cqh, ${100 * observation.height / observation.width}cqw)` }} role="img" aria-label="唱片顶部固定位置的放大观察窗" />
         </div>
         <div className="px-5 py-4 text-sm leading-6 text-muted-foreground sm:px-6">
-          <p>同步时动作原位接替，失配时沿圆周漂移。</p>
+          <p>逐格同步时，动作在原位接替。轻微失配时，可看到图案沿圆周漂移。</p>
           <p className="mt-1 text-xs">{mode === 'camera' ? '按相机采样时刻更新，曝光拖影与完整盘面一致。' : '连续旋转预览，也受屏幕刷新率影响。'}</p>
         </div>
       </section>
@@ -136,7 +136,7 @@ export function SimulatorCanvas({ layout, mode, playing, fps, exposure, blur, gu
       <section hidden={layout === 'observation'} aria-labelledby="record-title" className="preview-panel record-panel">
         <div className="px-5 pb-3 pt-5 sm:px-6">
           <h2 id="record-title" className="text-base font-semibold">旋转盘面</h2>
-          <p className="mt-1 text-xs text-muted-foreground">拖拽白框边缘调整视野 · 悬停选择比例</p>
+          <p className="mt-1 text-xs text-muted-foreground">拖动框内调整半径 · 拖动边缘调整视野</p>
         </div>
         <div className="record-stage">
           <div {...bind()} ref={surfaceRef} role="group" aria-label="唱片搓碟区域，暂停时拖动旋转，左右方向键微调，Shift 加速" tabIndex={0} data-testid="record-surface" className="scratch-surface record-disc relative aspect-square select-none" style={{ transform: `scale(${zoom})`, transformOrigin: '50% 15%', touchAction: playing ? 'auto' : 'none', cursor: playing ? 'default' : scratching ? 'grabbing' : 'grab' }} onKeyDown={(event) => {
@@ -146,7 +146,7 @@ export function SimulatorCanvas({ layout, mode, playing, fps, exposure, blur, gu
             }
           }}>
             <canvas ref={canvasRef} width="1024" height="1024" className="block size-full" role="img" aria-label="由完整静态盘面旋转和曝光累积生成的唱片预览" data-testid="record" />
-            <ObservationWindow centerY={centerY} size={{ width: observation.width, height: observation.height }} onChange={setObservationSize} />
+            <ObservationWindow onRadiusChange={onRadiusChange} radius={radius} centerY={centerY} size={{ width: observation.width, height: observation.height }} onChange={setObservationSize} />
           </div>
         </div>
         <p className="px-5 py-4 text-xs leading-6 text-muted-foreground sm:px-6">{playing ? '暂停后可拖动唱片搓碟。' : '拖动旋转 · ← → 微调 · Shift 加速'}</p>

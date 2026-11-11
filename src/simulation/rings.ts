@@ -22,6 +22,22 @@ export function createDefaultRings(): RingLayer[] {
   ].map((ring) => ({ ...ring, enabled: true, sourceInner: 60, sourceOuter: 94, phase: 0 })) as RingLayer[]
 }
 
+// Only these fields affect the pixels of one projected layer.
+export function sameRingProjection(a: RingLayer, b: RingLayer) {
+  return a.material === b.material && a.geometry === b.geometry &&
+    a.inner === b.inner && a.outer === b.outer && a.phase === b.phase &&
+    a.sourceInner === b.sourceInner && a.sourceOuter === b.sourceOuter
+}
+
+export function sameRingLayout(a?: RingLayer[], b?: RingLayer[]) {
+  if (a === b) return true
+  if (!a || !b || a.length !== b.length) return false
+  return a.every((ring, index) => {
+    const next = b[index]
+    return ring.id === next.id && ring.enabled === next.enabled && sameRingProjection(ring, next)
+  })
+}
+
 export function ringError(ring: RingLayer): string | null {
   const geometry = geometryError(ring.geometry)
   if (geometry) return geometry

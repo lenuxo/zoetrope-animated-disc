@@ -37,7 +37,11 @@ export const PlateEditor = memo(function PlateEditor({ material, geometry, onSel
   const latestGeometry = useRef(geometry)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { latestGeometry.current = geometry }, [geometry])
+  useEffect(() => {
+    latestGeometry.current = geometry
+    setGeometryDraft(geometryFields(geometry))
+    if (material.kind === 'image') uploadedGeometry.current = geometry
+  }, [geometry, material.kind])
   useEffect(() => { latestOnSelect.current = onSelect }, [onSelect])
   useEffect(() => {
     const life = lifetime.current

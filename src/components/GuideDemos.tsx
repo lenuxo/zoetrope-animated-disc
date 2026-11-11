@@ -62,8 +62,8 @@ export function SamplingDemo({ geometry, rpm }: { geometry: PlateGeometry; rpm: 
   const sample = Math.floor(clock.time * fps + 1e-6)
   useEffect(() => {
     if (!buffers.current || buffers.current.geometry !== geometry || buffers.current.rpm !== rpm) {
-      const sampled = document.createElement('canvas')
-      sampled.width = sampled.height = 600
+      const sampled = buffers.current?.sampled ?? document.createElement('canvas')
+      if (!buffers.current) sampled.width = sampled.height = 600
       buffers.current = { plate: createPlate({ kind: 'example', example: 'bounce' }, geometry), sampled, motion: new RotationTimeline(rpm), geometry, rpm }
     }
     const { plate, sampled, motion } = buffers.current

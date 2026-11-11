@@ -3,7 +3,8 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Link } from 'react-router'
+import { useNavigate, useOutletContext } from 'react-router'
+import type { WorkbenchPlan } from '../simulation/plate'
 import { ArrowRight, Check, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { LayoutDemo, LoopDemo, ParameterPreview, SamplingDemo } from '@/components/GuideDemos'
@@ -76,6 +77,8 @@ function ParameterPlanner({ presetIndex, frames, onPreset, onFrames }: { presetI
 }
 
 export function DesignGuidePage() {
+  const navigate = useNavigate()
+  const applyPlan = useOutletContext<(plan: WorkbenchPlan) => void>()
   const [draft, setDraft] = useState<Draft>(readDraft)
   const { goal, presetIndex, frames, completed } = draft
   const preset = presets[presetIndex]
@@ -84,8 +87,14 @@ export function DesignGuidePage() {
   const degrees = Number((360 / geometry.slots).toFixed(3))
   const done = completed.filter(Boolean).length
   const goalText = goal.trim() || defaultDraft.goal
-  const setFrames = (value: number) => setDraft((current) => ({ ...current, frames: value }))
-  const onPreset = (index: number) => setDraft((current) => ({ ...current, presetIndex: index, frames: presets[index].frames }))
+  const changePlan = (index: number, nextFrames: number) => setDraft((current) => {
+    if (current.presetIndex === index && current.frames === nextFrames) return current
+    return { ...current, presetIndex: index, frames: nextFrames, completed: current.completed.map((checked, i) => i === 0 && checked) }
+  })
+  const openWorkbench = () => {
+    applyPlan({ geometry, rpm: presetIndex === 0 ? 100 / 3 : 45 })
+    navigate('/')
+  }
   const toggleStep = (index: number) => setDraft((current) => ({ ...current, completed: current.completed.map((value, i) => i === index ? !value : value) }))
   const checkpoint = (index: number, output: string) => <Checkpoint index={index} output={output} checked={completed[index]} onChange={() => toggleStep(index)} />
   useEffect(() => { try { sessionStorage.setItem(draftKey, JSON.stringify(draft)) } catch { /* Continue when storage is unavailable. */ } }, [draft])
@@ -117,13 +126,13 @@ export function DesignGuidePage() {
       <aside className="guide-contents"><nav aria-label="盘面制作步骤">
         <p>制作进度 · {done} / 6</p><progress value={done} max={6} aria-label="已完成制作步骤" />
         {sections.map(([id, title], index) => <a href={`#${id}`} key={id} className={completed[index] ? 'is-complete' : ''}><span className="guide-nav-step">{completed[index] ? <Check aria-label="已完成" /> : index + 1}</span>{title}</a>)}
-        <span className="guide-progress-hint">完成一步后勾选自查。参数与进度会在当前标签页保留。</span>
+        <span className="guide-progress-hint">完成一步后勾选自查。当前标签页会保留进度。更改帧数或观看组合后，请从第 2 步重新核对。</span>
       </nav></aside>
       <article className="guide-article">
         <Step index={0}>
           <p className="guide-task-lead">先写清楚：你的主体，要反复做哪一个动作？</p>
           <p>第一张先画一个主体、一圈动作。选原地弹跳、花朵开合或箭头自转，让动作结束时能接回开始的状态。</p>
-          <div className="guide-goal-field"><Label htmlFor="guide-goal">我的动作目标</Label><Input id="guide-goal" maxLength={120} value={goal} onChange={(e) => setDraft((current) => ({ ...current, goal: e.target.value }))} /><p className="guide-caption">例如「一颗小球，原地弹跳一次」。后面的设计单会带上这个目标。</p></div>
+          <div className="guide-goal-field"><Label htmlFor="guide-goal">我的动作目标</Label><Input id="guide-goal" maxLength={120} value={goal} onChange={(e) => setDraft((current) => ({ ...current, goal: e.target.value, completed: current.completed.map((checked, i) => i === 1 && checked) }))} /><p className="guide-caption">例如「一颗小球，原地弹跳一次」。后面的设计单会带上这个目标。</p></div>
           <h3>跟着小球做</h3>
           <p>画一颗落在基线上的小球，让它上升到最高点，再落回基线。整套动作都对齐同一个圆心横坐标与地面基线。</p>
           <p>选定主体后，先画出最宽、最高的姿态，确认缩小后仍能看清。第一版先保留轮廓和明显的明暗对比。</p>
@@ -132,7 +141,7 @@ export function DesignGuidePage() {
         <Step index={1}>
           <p className="guide-task-lead">先用默认方案：画 18 帧，重复 3 次，铺满 54 个位置。</p>
           <p>这套方案以 33⅓ RPM 旋转、30 fps 观看，小球每 0.6 秒弹跳一次。点击「播放联动预览」感受节奏；想慢一点就增加独立帧数，想快一点就增加重复次数。</p>
-          <ParameterPlanner presetIndex={presetIndex} frames={frames} onPreset={onPreset} onFrames={setFrames} />
+          <ParameterPlanner presetIndex={presetIndex} frames={frames} onPreset={(index) => changePlan(index, presets[index].frames)} onFrames={(value) => changePlan(presetIndex, value)} />
           <div className="guide-current-plan"><strong>接下来按这份参数制作</strong><p>画 <b>{frames}</b> 张不同姿态 → 沿圆周放 <b>{geometry.repeats}</b> 遍 → 共 <b>{geometry.slots}</b> 个位置。下面的说明与下载模板会一起更新。</p></div>
           <details className="guide-disclosure"><summary>想使用其他转速或采样率？</summary><p>逐格同步时，圆周格数 = 60 × 采样率 ÷ RPM；格数还要等于独立帧数 × 重复次数。结果不是整数时，需要调整观看参数，不能直接四舍五入并期待精确同步。第一版建议先完成上面的匹配组合。</p></details>
           {checkpoint(1, `已选定 ${frames} 帧 × ${geometry.repeats} 次，知道要画几张图、动作多快。`)}
@@ -167,11 +176,11 @@ export function DesignGuidePage() {
           <SamplingDemo geometry={geometry} rpm={presetIndex === 0 ? 100 / 3 : 45} />
           <ol className="guide-steps">
             <li><h3>在工作台上传自己的 PNG</h3><p>在「盘面素材与校准」上传图片。按原图设置圆心和外缘半径，点击「应用校准」。如果沿用下载模板，圆心是 (600, 600)，外缘半径为 560 像素；改变过导出尺寸时，按新图片重新校准。</p></li>
-            <li><h3>填入同一份参数并应用</h3><p>设圆周格数 <b>{geometry.slots}</b>、独立帧数 <b>{frames}</b>、重复次数 <b>{geometry.repeats}</b>，应用排布；转速选 <b>{preset.rpm} RPM</b>，方向为顺时针。填写参数只是在声明图片的实际排布，不会重排已经画好的内容。</p></li>
+            <li><h3>核对工作台里的制作参数</h3><p>用本页按钮打开工作台后，核对圆周格数 <b>{geometry.slots}</b>、独立帧数 <b>{frames}</b>、重复次数 <b>{geometry.repeats}</b>，转速 <b>{preset.rpm} RPM</b>，方向为顺时针。这些参数应与你在绘图工具中导出的盘面一致。</p></li>
             <li><h3>先看清，再检查方向和接缝</h3><p>选择「相机采样」，开启自动匹配，应得到 30 fps；曝光从 1/1000 秒起步。调整观察半径对准你的圆环。先播放，再暂停逐帧检查；完成后试着延长曝光，确认拖影是否影响辨认。</p></li>
           </ol>
-          <div className="guide-action-row"><Button asChild><Link to="/">去工作台导入盘面<ArrowRight /></Link></Button><Button variant="outline" onClick={() => downloadFile('zoetrope-design-notes.txt', designNotes(), 'text/plain;charset=utf-8')}><Download />带上参数单</Button></div>
-          <p className="guide-caption">演示中的小球不是你上传的素材。自己的源帧与图片在绘图工具里制作，再在工作台本地导入。这里的参数不会自动覆盖工作台设置。</p>
+          <div className="guide-action-row"><Button onClick={openWorkbench}>用这份参数打开工作台<ArrowRight /></Button><Button variant="outline" onClick={() => downloadFile('zoetrope-design-notes.txt', designNotes(), 'text/plain;charset=utf-8')}><Download />带上参数单</Button></div>
+          <p className="guide-caption">此按钮将工作台切到单盘面，并应用当前排布、顺时针转速和短曝光。可继续使用已导入的图片，也可以上传新的盘面。</p>
           <details className="guide-disclosure" id="troubleshooting"><summary>预览和预期不一样？按现象找修改位置</summary>
             <div className="guide-table-wrap"><table><caption className="sr-only">预览问题与返回修改的步骤</caption><thead><tr><th scope="col">现象</th><th scope="col">回到哪里修改</th></tr></thead><tbody>
               <tr><th scope="row">动作倒放、图案转头</th><td>回到第 4 步，检查帧序、旋转方向与局部朝向。</td></tr>

@@ -8,12 +8,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PlateEditor } from './PlateEditor'
 import { ringError } from '../simulation/rings'
 import type { RingLayer } from '../simulation/rings'
-import { matchedFps, slotsPerSample } from '../simulation/model'
+import { matchedFps, sampleMatch } from '../simulation/model'
 
 type Props = {
   rings: RingLayer[]
   fps: number
   rpm: number
+  turns: number
+  variableSpeed: boolean
   referenceId?: string
   observedId?: string
   onChange: (rings: RingLayer[]) => void
@@ -51,16 +53,15 @@ function RingPlacement({ ring, onApply }: { ring: RingLayer; onApply: (ring: Rin
   )
 }
 
-function RingDetail({ ring, fps, rpm, referenceId, observedId, update, onReference, onObserve, onMove, onDelete, canMoveUp, canMoveDown, canDelete }: {
-  ring: RingLayer; fps: number; rpm: number; referenceId?: string; observedId?: string
+function RingDetail({ ring, fps, rpm, turns, variableSpeed, referenceId, observedId, update, onReference, onObserve, onMove, onDelete, canMoveUp, canMoveDown, canDelete }: {
+  ring: RingLayer; fps: number; rpm: number; turns: number; variableSpeed: boolean; referenceId?: string; observedId?: string
   update: (ring: RingLayer) => void; onReference: (id: string) => void; onObserve: (id: string) => void
   onMove: (delta: number) => void; onDelete: () => void; canMoveUp: boolean; canMoveDown: boolean; canDelete: boolean
 }) {
   const [tab, setTab] = useState('material')
   const [name, setName] = useState(ring.name)
-  const advance = Math.abs(slotsPerSample(rpm, fps, ring.geometry.slots))
+  const { advance, label } = sampleMatch(turns, ring.geometry.slots, variableSpeed)
   const ownFps = matchedFps(rpm, ring.geometry.slots)
-  const synchronized = Math.abs(advance - 1) < 0.00001
   return (
     <div className="min-w-0">
       <div className="flex items-center justify-between gap-3 pb-3">
@@ -74,7 +75,7 @@ function RingDetail({ ring, fps, rpm, referenceId, observedId, update, onReferen
         </TabsContent>
         <TabsContent value="placement" forceMount className="min-w-0 pt-3 data-[state=inactive]:hidden"><RingPlacement ring={ring} onApply={update} /></TabsContent>
         <TabsContent value="sampling" forceMount className="space-y-4 pt-3 data-[state=inactive]:hidden">
-          <div><p className="text-sm font-medium">{!ring.enabled ? '本圈已隐藏' : synchronized ? '本圈逐格同步' : '本圈非逐格匹配'}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">所有圆环共用转速与相机。这里检查本圈在当前设置下的结果。</p></div>
+          <div><p className="text-sm font-medium">{!ring.enabled ? '本圈已隐藏' : '本圈' + label}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">所有圆环共用转速与相机。这里检查本圈在当前设置下的结果。</p></div>
           <dl className="divide-y text-xs">
             {[
               ['共用转速', `${rpm.toFixed(2)} RPM`], ['当前相机', `${fps.toFixed(3)} fps`], ['每次采样前进', `${advance.toFixed(3)} 格`], ['本圈逐格所需采样率', `${ownFps.toFixed(3)} fps`], ['逐格匹配时动作周期', `${(ring.geometry.frames / ownFps).toFixed(3)} s`],
@@ -95,7 +96,7 @@ function RingDetail({ ring, fps, rpm, referenceId, observedId, update, onReferen
   )
 }
 
-export const RingEditor = memo(function RingEditor({ rings, fps, rpm, referenceId, observedId, onChange, onReference, onObserve }: Props) {
+export const RingEditor = memo(function RingEditor({ rings, fps, rpm, turns, variableSpeed, referenceId, observedId, onChange, onReference, onObserve }: Props) {
   const [expandedIds, setExpandedIds] = useState<string[]>([rings[0].id])
   const toggle = (id: string) => setExpandedIds((value) => value.includes(id) ? value.filter((item) => item !== id) : [...value, id])
   const update = (next: RingLayer) => onChange(rings.map((ring) => ring.id === next.id ? next : ring))
@@ -130,7 +131,7 @@ export const RingEditor = memo(function RingEditor({ rings, fps, rpm, referenceI
               <Switch aria-label={`启用${ring.name}`} checked={ring.enabled} onCheckedChange={(enabled) => update({ ...ring, enabled })} />
             </div>
             <div id={bodyId} hidden={!expanded} role="region" aria-labelledby={triggerId} className="border-t px-3 pt-3">
-              <RingDetail ring={ring} fps={fps} rpm={rpm} referenceId={referenceId} observedId={observedId} update={update} onReference={onReference} onObserve={onObserve} onMove={(delta) => move(index, delta)} onDelete={() => onChange(rings.filter((item) => item.id !== ring.id))} canMoveUp={index > 0} canMoveDown={index < rings.length - 1} canDelete={rings.length > 1} />
+              <RingDetail turns={turns} variableSpeed={variableSpeed} ring={ring} fps={fps} rpm={rpm} referenceId={referenceId} observedId={observedId} update={update} onReference={onReference} onObserve={onObserve} onMove={(delta) => move(index, delta)} onDelete={() => onChange(rings.filter((item) => item.id !== ring.id))} canMoveUp={index > 0} canMoveDown={index < rings.length - 1} canDelete={rings.length > 1} />
             </div>
           </section>
         })}

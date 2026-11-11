@@ -1,8 +1,9 @@
+import { drawExposure } from './exposure'
 import { exposureSamples, PLATE, sourceFrameAtSlot } from './model'
 import type { RotationModel } from './model'
 import { diagnosticPose, imagePlacement } from './plate'
 import type { PlateGeometry, PlateMaterial } from './plate'
-import { createRingProjector } from './rings'
+import { createRingProjector, sameRingLayout, sameRingProjection } from './rings'
 import type { RingLayer } from './rings'
 
 const TAU = Math.PI * 2
@@ -104,24 +105,57 @@ export function renderExposure(
 ) {
   const size = ctx.canvas.width
   const samples = exposureSamples(model, time, exposure, size)
-  ctx.clearRect(0, 0, size, size)
-  ctx.save()
-  // Add weighted premultiplied pixels. Source-over at fixed alpha would bias later samples.
-  ctx.globalCompositeOperation = 'lighter'
-  for (const sample of samples) {
-    ctx.save()
-    ctx.translate(size / 2, size / 2)
-    ctx.rotate(sample.angle % TAU)
-    ctx.globalAlpha = sample.weight
-    ctx.drawImage(plate, -size / 2, -size / 2, size, size)
-    ctx.restore()
-  }
-  ctx.restore()
+  drawExposure(ctx, plate, samples)
   return samples.length
 }
 
+function projectRing(ring: RingLayer, center: number, radius: number) {
+  const source = createPlate(ring.material, ring.geometry, false).getContext('2d')!.getImageData(0, 0, SIZE, SIZE).data
+  const layer = new ImageData(SIZE, SIZE)
+  const projection = createRingProjector(ring, radius)
+  const { inner, outer } = projection
+  const mapped = { x: 0, y: 0, distance: 0 }
+  const min = Math.max(0, Math.floor(center - outer - 1))
+  const max = Math.min(SIZE - 1, Math.ceil(center + outer + 1))
+  for (let y = min; y <= max; y++) {
+    const dy = y + 0.5 - center
+    for (let x = min; x <= max; x++) {
+      const dx = x + 0.5 - center
+      if (!projection.map(dx, dy, mapped)) continue
+      const distance = mapped.distance
+      const sx = center + mapped.x - 0.5
+      const sy = center + mapped.y - 0.5
+      const ix = Math.max(0, Math.min(SIZE - 2, Math.floor(sx)))
+      const iy = Math.max(0, Math.min(SIZE - 2, Math.floor(sy)))
+      const fx = Math.max(0, Math.min(1, sx - ix))
+      const fy = Math.max(0, Math.min(1, sy - iy))
+      const i00 = (iy * SIZE + ix) * 4
+      const i10 = i00 + 4
+      const i01 = i00 + SIZE * 4
+      const i11 = i01 + 4
+      const a00 = source[i00 + 3] / 255 * (1 - fx) * (1 - fy)
+      const a10 = source[i10 + 3] / 255 * fx * (1 - fy)
+      const a01 = source[i01 + 3] / 255 * (1 - fx) * fy
+      const a11 = source[i11 + 3] / 255 * fx * fy
+      const alpha = a00 + a10 + a01 + a11
+      const index = (y * SIZE + x) * 4
+      if (alpha === 0) continue
+      for (let channel = 0; channel < 3; channel++) {
+        layer.data[index + channel] = (source[i00 + channel] * a00 + source[i10 + channel] * a10 + source[i01 + channel] * a01 + source[i11 + channel] * a11) / alpha
+      }
+      layer.data[index + 3] = alpha * 255 * Math.min(1, distance - inner, outer - distance)
+    }
+  }
+  const buffer = document.createElement('canvas')
+  buffer.width = buffer.height = SIZE
+  buffer.getContext('2d')!.putImageData(layer, 0, 0)
+  return buffer
+}
+
+type ProjectedRings = Map<string, { ring: RingLayer; canvas: HTMLCanvasElement }>
+
 /** Flatten all enabled annuli before motion/exposure. Later layers cover earlier layers. */
-export function createCompositePlate(rings: RingLayer[], guides = false) {
+export function createCompositePlate(rings: RingLayer[], guides = false, cache: ProjectedRings = new Map()) {
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = SIZE
   const ctx = canvas.getContext('2d')!
@@ -130,47 +164,18 @@ export function createCompositePlate(rings: RingLayer[], guides = false) {
   ctx.fillStyle = 'oklch(0.22 0.018 260)'
   ctx.beginPath(); ctx.arc(center, center, radius, 0, TAU); ctx.fill()
 
+  for (const id of cache.keys()) {
+    if (!rings.some((ring) => ring.id === id)) cache.delete(id)
+  }
   for (const ring of rings.filter((item) => item.enabled)) {
-    const source = createPlate(ring.material, ring.geometry, false).getContext('2d')!.getImageData(0, 0, SIZE, SIZE).data
-    const layer = ctx.createImageData(SIZE, SIZE)
-    const projection = createRingProjector(ring, radius)
-    const { inner, outer } = projection
-    const mapped = { x: 0, y: 0, distance: 0 }
-    const min = Math.max(0, Math.floor(center - outer - 1))
-    const max = Math.min(SIZE - 1, Math.ceil(center + outer + 1))
-    for (let y = min; y <= max; y++) {
-      const dy = y + 0.5 - center
-      for (let x = min; x <= max; x++) {
-        const dx = x + 0.5 - center
-        if (!projection.map(dx, dy, mapped)) continue
-        const distance = mapped.distance
-        const sx = center + mapped.x - 0.5
-        const sy = center + mapped.y - 0.5
-        const ix = Math.max(0, Math.min(SIZE - 2, Math.floor(sx)))
-        const iy = Math.max(0, Math.min(SIZE - 2, Math.floor(sy)))
-        const fx = Math.max(0, Math.min(1, sx - ix))
-        const fy = Math.max(0, Math.min(1, sy - iy))
-        const i00 = (iy * SIZE + ix) * 4
-        const i10 = i00 + 4
-        const i01 = i00 + SIZE * 4
-        const i11 = i01 + 4
-        const a00 = source[i00 + 3] / 255 * (1 - fx) * (1 - fy)
-        const a10 = source[i10 + 3] / 255 * fx * (1 - fy)
-        const a01 = source[i01 + 3] / 255 * (1 - fx) * fy
-        const a11 = source[i11 + 3] / 255 * fx * fy
-        const alpha = a00 + a10 + a01 + a11
-        const index = (y * SIZE + x) * 4
-        if (alpha === 0) continue
-        for (let channel = 0; channel < 3; channel++) {
-          layer.data[index + channel] = (source[i00 + channel] * a00 + source[i10 + channel] * a10 + source[i01 + channel] * a01 + source[i11 + channel] * a11) / alpha
-        }
-        layer.data[index + 3] = alpha * 255 * Math.min(1, distance - inner, outer - distance)
-      }
+    let projected = cache.get(ring.id)
+    if (!projected || !sameRingProjection(projected.ring, ring)) {
+      projected = { ring, canvas: projectRing(ring, center, radius) }
+      cache.set(ring.id, projected)
     }
-    const buffer = document.createElement('canvas')
-    buffer.width = buffer.height = SIZE
-    buffer.getContext('2d')!.putImageData(layer, 0, 0)
-    ctx.drawImage(buffer, 0, 0)
+    const inner = ring.inner / 100 * radius
+    const outer = ring.outer / 100 * radius
+    ctx.drawImage(projected.canvas, 0, 0)
     if (guides) {
       ctx.save(); ctx.translate(center, center)
       const labelRadius = outer - Math.min(10, (outer - inner) * 0.15)
@@ -193,4 +198,27 @@ export function createCompositePlate(rings: RingLayer[], guides = false) {
   if (labelRadius > 40) ctx.fillText('RINGS', center, center - 20)
   ctx.beginPath(); ctx.arc(center, center, 9, 0, TAU); ctx.fill()
   return canvas
+}
+
+/** Keep at most two final textures; clean and numbered views share projected rings. */
+export class PlateTextureCache {
+  private material?: PlateMaterial
+  private geometry?: PlateGeometry
+  private rings?: RingLayer[]
+  private images: HTMLCanvasElement[] = []
+  private projected: ProjectedRings = new Map()
+
+  get(material: PlateMaterial, geometry: PlateGeometry, rings: RingLayer[] | undefined, guides: boolean) {
+    if (!sameRingLayout(this.rings, rings) || (!rings && (this.material !== material || this.geometry !== geometry))) {
+      this.images = []
+    }
+    this.material = material
+    this.geometry = geometry
+    this.rings = rings
+    if (!rings) this.projected.clear()
+    const index = Number(guides)
+    return this.images[index] ??= rings
+      ? createCompositePlate(rings, guides, this.projected)
+      : createPlate(material, geometry, guides)
+  }
 }

@@ -1,4 +1,5 @@
 export type PlateGeometry = { slots: number; frames: number; repeats: number }
+export type WorkbenchPlan = { geometry: PlateGeometry; rpm: number }
 export type Calibration = { centerX: number; centerY: number; radius: number }
 export type ExampleId = 'bounce' | 'sequence' | 'seam'
 export type PlateMaterial =

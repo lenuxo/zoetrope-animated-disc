@@ -143,3 +143,25 @@ test('scratching crosses the ±π seam in either direction without jumping a ful
   close(angularDelta(-179 * degrees, 179 * degrees), -2 * degrees)
   close(angularDelta(0, Math.PI / 2), Math.PI / 2)
 })
+
+test('shutter travel includes each reversal even when all three old probes coincide', () => {
+  const motion = new RotationTimeline(60)
+  motion.setSpeedAt(0.25, -60)
+  motion.setSpeedAt(0.5, 60)
+  motion.setSpeedAt(0.75, -60)
+  close(motion.angularTravel(0, 1), TAU)
+  close(motion.angularTravel(0.125, 0.375), TAU / 4)
+  const samples = exposureSamples(motion, 1, 1, 1024)
+  assert.equal(samples.length, 96)
+  assert.ok(samples.some((sample) => sample.angle > 1.4))
+  close(samples.reduce((sum, sample) => sum + sample.weight, 0), 1)
+})
+
+test('shutter travel includes a zero crossing inside one linear motor ramp', () => {
+  const motion = new RotationTimeline(60)
+  motion.setSpeedAt(0, -60, 2)
+  close(motion.angularTravel(0, 2), TAU)
+  close(motion.angularTravel(0.5, 1.5), TAU / 4)
+  motion.setSpeedAt(1, 30)
+  close(motion.angularTravel(0, 2), TAU)
+})

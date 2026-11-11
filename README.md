@@ -29,6 +29,7 @@ npm run dev
 | 命令 | 说明 |
 | --- | --- |
 | `npm test` | 运行模拟引擎与模板测试 |
+| `npm run test:e2e` | 运行 Chromium 界面与渲染像素回归，首次运行前执行 `npx playwright install chromium --only-shell` |
 | `npm run lint` | 静态检查 |
 | `npm run build` | 类型检查并构建到 `dist/` |
 | `npm run preview` | 预览构建产物 |

@@ -70,6 +70,10 @@ export class CdRotation implements RotationModel {
     const acceleration = i + 1 < this.speeds.length ? (this.speeds[i + 1] - this.speeds[i]) * 240 : 0
     return this.phase + this.angles[i] + (this.speeds[i] * elapsed + acceleration * elapsed ** 2 / 2) * Math.PI / 30
   }
+  angularTravel(start: number, end: number) {
+    // The motor direction is fixed throughout one CD scan.
+    return Math.abs(this.angleAt(end) - this.angleAt(start))
+  }
   rotateBy(radians: number) { if (Number.isFinite(radians)) this.phase += radians }
   reset(_rpm?: number) { this.phase = 0 }
 }

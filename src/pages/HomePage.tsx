@@ -4,23 +4,23 @@ import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useCallback, useState } from 'react'
+import { useCallback, useImperativeHandle, useId, useState } from 'react'
+import type { Ref } from 'react'
 import { SimulatorCanvas } from '../components/SimulatorCanvas'
 import { CdDriveEditor } from '../components/CdDriveEditor'
 import { CdRotation, DEFAULT_CD } from '../simulation/cd'
 import type { CdConfig } from '../simulation/cd'
 import { RingEditor } from '../components/RingEditor'
-import { createDefaultRings, referenceRing } from '../simulation/rings'
+import { createDefaultRings, referenceRing, sameRingLayout } from '../simulation/rings'
 import type { RingLayer } from '../simulation/rings'
 import { PlateEditor } from '../components/PlateEditor'
 import { EXAMPLES } from '../simulation/plate'
-import type { PlateGeometry, PlateMaterial } from '../simulation/plate'
+import type { PlateGeometry, PlateMaterial, WorkbenchPlan } from '../simulation/plate'
 import type { FrameInfo, PreviewLayout, ViewMode } from '../components/SimulatorCanvas'
-import { FixedRateSchedule, matchedFps, PLATE, RotationTimeline, slotsPerSample, Transport } from '../simulation/model'
+import { FixedRateSchedule, matchedFps, MAX_EXPOSURE_SAMPLES, PLATE, RotationTimeline, sampleMatch, turnsPerSample, Transport } from '../simulation/model'
 
 const modes: { value: ViewMode; label: string }[] = [
   { value: 'continuous', label: '连续旋转' }, { value: 'camera', label: '相机采样' },
@@ -29,13 +29,34 @@ const presets = [{ label: '33⅓', rpm: 100 / 3 }, { label: '45', rpm: 45 }, { l
 const exposures = [{ value: '0.0005', label: '1/2000 秒' }, { value: '0.001', label: '1/1000 秒' }, { value: '0.004', label: '1/250 秒' }, { value: '0.008333333333333333', label: '1/120 秒' }, { value: '0.016666666666666666', label: '1/60 秒' }, { value: 'frame', label: '一整帧（最长曝光）' }]
 const displayRpm = (rpm: number) => rpm === 100 / 3 ? '33⅓' : rpm.toFixed(2).replace(/\.?0+$/, '')
 
-export function HomePage() {
-  const [motion, setMotion] = useState<RotationTimeline | CdRotation>(() => new RotationTimeline())
+function ModeSelector<T extends string>({ label, value, options, onChange }: {
+  label: string
+  value: T
+  options: { value: T; label: string }[]
+  onChange: (value: T) => void
+}) {
+  const name = useId()
+  return <div role="radiogroup" aria-label={label} className="mode-selector">
+    {options.map((option) => <label key={option.value}>
+      <input type="radio" className="sr-only" name={name} value={option.value} checked={value === option.value} onChange={() => onChange(option.value)} />
+      {option.label}
+    </label>)}
+  </div>
+}
+
+export type WorkbenchControls = { pause: () => void; applyPlan: (plan: WorkbenchPlan) => void }
+
+export function HomePage({ ref, active, initialPlan }: {
+  ref: Ref<WorkbenchControls>
+  active: boolean
+  initialPlan: WorkbenchPlan | null
+}) {
+  const [motion, setMotion] = useState<RotationTimeline | CdRotation>(() => new RotationTimeline(initialPlan?.rpm))
   const [drive, setDrive] = useState<'constant' | 'cd'>('constant')
   const [cdConfig, setCdConfig] = useState<CdConfig>({ ...DEFAULT_CD })
   const [transport] = useState(() => new Transport())
   const [material, setMaterial] = useState<PlateMaterial>({ kind: 'example', example: 'bounce' })
-  const [geometry, setGeometry] = useState<PlateGeometry>(() => ({ ...PLATE }))
+  const [geometry, setGeometry] = useState<PlateGeometry>(() => initialPlan?.geometry ?? { ...PLATE })
   const materialName = material.kind === 'image' ? material.name : EXAMPLES.find((example) => example.id === material.example)!.name
   const [multiRing, setMultiRing] = useState(false)
   const [rings, setRings] = useState<RingLayer[]>(createDefaultRings)
@@ -47,7 +68,7 @@ export function HomePage() {
   const [layout, setLayout] = useState<PreviewLayout>('both')
   const [mode, setMode] = useState<ViewMode>('camera')
   const [playing, setPlaying] = useState(false)
-  const [rpm, setRpm] = useState(100 / 3)
+  const [rpm, setRpm] = useState(initialPlan?.rpm ?? 100 / 3)
   const [direction, setDirection] = useState(1)
   const [automatic, setAutomatic] = useState(true)
   const [manualFps, setManualFps] = useState(30)
@@ -69,8 +90,8 @@ export function HomePage() {
   const maxFps = Math.max(120, Math.ceil(matchedFps(Math.max(initialRpm, liveRpm), activeGeometry.slots) * 1.1), Math.ceil(manualFps))
   const requestedExposure = shutter === 'frame' ? 1 / fps : Number(shutter)
   const exposure = Math.min(requestedExposure, 1 / fps)
-  const advance = frame.sampleTime > 0 ? Math.abs(motion.angleAt(frame.sampleTime) - motion.angleAt(Math.max(0, frame.sampleTime - 1 / fps))) * activeGeometry.slots / (2 * Math.PI) : Math.abs(slotsPerSample(liveRpm, fps, activeGeometry.slots))
-  const synchronized = Math.abs(advance - 1) < (drive === 'cd' ? 0.0005 : 0.00001)
+  const turns = turnsPerSample(motion, frame.sampleTime, fps)
+  const match = sampleMatch(turns, activeGeometry.slots, drive === 'cd')
 
   const changeSpeed = (speed: number, sign = direction) => {
     if (motion instanceof RotationTimeline) motion.setSpeedAt(transport.timeAt(performance.now()), speed * sign)
@@ -105,9 +126,35 @@ export function HomePage() {
     transport.setPlaying(false, now)
     transport.seek(0, now)
     motion.reset(signedRpm)
+    if (motion instanceof RotationTimeline) {
+      setRpm(Math.abs(signedRpm))
+      setDirection(Math.sign(signedRpm))
+    }
     setPlaying(false)
     setRevision((value) => value + 1)
   }, [motion, transport, setPlaying, setRevision])
+  useImperativeHandle(ref, () => ({
+    pause() {
+      transport.setPlaying(false, performance.now())
+      setPlaying(false)
+    },
+    applyPlan(plan) {
+      const now = performance.now()
+      transport.setPlaying(false, now)
+      transport.seek(0, now)
+      setPlaying(false)
+      setGeometry(plan.geometry)
+      setMultiRing(false)
+      setDrive('constant')
+      setMotion(new RotationTimeline(plan.rpm))
+      setRpm(plan.rpm)
+      setDirection(1)
+      setMode('camera')
+      setAutomatic(true)
+      setShutter('0.001')
+    },
+  }), [transport])
+
   const selectMaterial = useCallback((next: PlateMaterial, nextGeometry?: PlateGeometry) => {
     reset()
     setMaterial(next)
@@ -118,10 +165,24 @@ export function HomePage() {
     setGeometry(next)
   }, [reset])
 
-  const changeRings = useCallback((next: RingLayer[]) => { reset(); setRings(next) }, [reset])
+  const changeRings = useCallback((next: RingLayer[]) => {
+    if (!sameRingLayout(rings, next)) reset()
+    setRings(next)
+  }, [rings, reset])
   const observeRing = useCallback((id: string) => setObserved((value) => ({ id, request: value.request + 1 })), [])
   const changeReference = useCallback((id: string) => { setReferenceId(id) }, [])
+  const [singleRadius, setSingleRadius] = useState(75)
+  const [ringRadius, setRingRadius] = useState<{ target: string; value: number } | null>(null)
   const observationTarget = multiRing && observedRing ? { key: `${observedRing.id}:${observedRing.inner}:${observedRing.outer}:${observed.request}`, name: observedRing.name, radius: (observedRing.inner + observedRing.outer) / 2 } : undefined
+
+  const observationRadius = observationTarget
+    ? (ringRadius?.target === observationTarget.key ? ringRadius.value : observationTarget.radius)
+    : singleRadius
+  const moveObservation = (value: number) => {
+    const radius = Math.round(Math.max(0, Math.min(100, value)) * 10) / 10
+    if (observationTarget) setRingRadius({ target: observationTarget.key, value: radius })
+    else setSingleRadius(radius)
+  }
 
   return (
     <div className="workbench">
@@ -131,7 +192,7 @@ export function HomePage() {
             <header className="sidebar-group-heading"><h2 id="playback-group-title">运动与采样</h2></header>
           <div className="sidebar-parameters">
             <section id="motion-settings" className="min-w-0 space-y-4 p-5" aria-labelledby="motion-title"><h3 id="motion-title" className="text-sm font-semibold">唱片运动</h3>
-              <Tabs value={drive} onValueChange={(value) => applyDrive(value as 'constant' | 'cd')}><TabsList aria-label="旋转驱动" className="w-full"><TabsTrigger value="constant" className="flex-1">恒定转速</TabsTrigger><TabsTrigger value="cd" className="flex-1">CD 受控变速</TabsTrigger></TabsList></Tabs>
+              <ModeSelector label="旋转驱动" value={drive} options={[{ value: 'constant', label: '恒定转速' }, { value: 'cd', label: 'CD 受控变速' }]} onChange={(value) => applyDrive(value)} />
               {drive === 'constant' ? <div className="space-y-4">
               <div className="flex items-baseline justify-between"><Label htmlFor="rotation-speed">转速</Label><output htmlFor="rotation-speed" className="text-base font-semibold tabular-nums">{displayRpm(rpm)} <span className="text-xs font-normal text-muted-foreground">RPM</span></output></div>
               <Slider id="rotation-speed" aria-label="转速" min={1} max={78} step={0.01} value={[rpm]} onValueChange={([value]) => changeSpeed(value)} />
@@ -141,7 +202,7 @@ export function HomePage() {
               <div className="flex items-center justify-between gap-3"><Label htmlFor="direction">旋转方向</Label><Select value={String(direction)} onValueChange={(value) => drive === 'cd' ? applyDrive('cd', cdConfig, Number(value)) : changeSpeed(rpm, Number(value))}><SelectTrigger size="sm" id="direction" aria-label="旋转方向" className="w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="1">顺时针</SelectItem><SelectItem value="-1">逆时针</SelectItem></SelectContent></Select></div>
             </section>
             <section id="camera-settings" className="min-w-0 space-y-4 p-5" aria-labelledby="camera-title"><h3 id="camera-title" className="text-sm font-semibold">相机配置</h3>
-              <Tabs value={mode} onValueChange={(value) => changeMode(value as ViewMode)}><TabsList aria-label="观察方式" className="w-full">{modes.map((item) => <TabsTrigger key={item.value} value={item.value} className="flex-1">{item.label}</TabsTrigger>)}</TabsList></Tabs>
+              <ModeSelector label="观察方式" value={mode} options={modes} onChange={changeMode} />
 
               <div className="flex items-center justify-between gap-3"><Label htmlFor="auto-fps">{drive === 'cd' ? '匹配起始转速' : '自动匹配'}</Label><Switch id="auto-fps" checked={automatic} onCheckedChange={(checked) => { setManualFps(fps); setAutomatic(checked) }} /></div>
               {drive === 'cd' && <div className="space-y-2"><p className="text-xs leading-5 text-muted-foreground">相机保持固定帧率，不随电机变速。起始匹配后出现漂移是预期现象。</p><Button variant="outline" size="sm" onClick={() => { setManualFps(matchedFps(liveRpm, activeGeometry.slots)); setAutomatic(false) }}>匹配当前转速</Button></div>}
@@ -149,7 +210,7 @@ export function HomePage() {
               <Slider aria-label="手动采样率" min={0.1} max={maxFps} step={0.1} value={[fps]} disabled={automatic} onValueChange={([value]) => setManualFps(value)} />
               <div className="flex items-center justify-between gap-3"><Label htmlFor="shutter" className="shrink-0">曝光时间</Label><Select value={shutter} onValueChange={setShutter}><SelectTrigger size="sm" id="shutter" aria-label="曝光时间" className="w-40"><SelectValue /></SelectTrigger><SelectContent>{exposures.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select></div>
               <p className="text-xs leading-5 text-muted-foreground">实际 {(exposure * 1000).toFixed(2)} ms · 上限为一个采样周期</p>
-              <div className="flex flex-wrap items-center justify-between gap-1 rounded-md bg-muted px-2 py-2 text-xs" data-testid="sync-status"><strong className="flex items-center gap-1.5 font-medium"><span className={`size-1.5 rounded-full ${synchronized ? 'bg-primary' : 'bg-destructive'}`} />{multiRing && !reference ? '没有启用圆环' : synchronized ? drive === 'cd' ? '近似逐格同步' : '逐格同步' : '采样失配'}</strong><span className="text-muted-foreground tabular-nums">{advance.toFixed(3)} 格 / 采样</span></div>
+              <div className="flex flex-wrap items-center justify-between gap-1 rounded-md bg-muted px-2 py-2 text-xs" data-testid="sync-status"><strong className="flex items-center gap-1.5 font-medium"><span className={`size-1.5 rounded-full ${match.synchronized ? 'bg-primary' : 'bg-destructive'}`} />{multiRing && !reference ? '没有启用圆环' : match.label}</strong><span className="text-muted-foreground tabular-nums">{match.advance.toFixed(3)} 格 / 采样</span></div>
             </section>
           </div>
           <section className="sidebar-subsection" aria-labelledby="experiments-title"><h3 id="experiments-title" className="mb-3 text-sm font-semibold">快速实验</h3>
@@ -163,10 +224,15 @@ export function HomePage() {
               <div className="flex flex-col items-start gap-4 pb-4">
                 <div className="flex items-center gap-2"><Switch id="guides" checked={guides} onCheckedChange={setGuides} /><Label htmlFor="guides">{multiRing ? '各圈位置与动作帧编号' : material.kind === 'image' ? '圆周位置编号（声明格数）' : '位置与动作帧编号'}</Label></div>
                 <div className="flex items-center gap-2"><Switch id="blur" checked={blur} disabled={mode !== 'continuous'} onCheckedChange={setBlur} /><Label htmlFor="blur">连续旋转拖影</Label></div>
+                <div className="flex items-center gap-2"><Label htmlFor="observation-radius">观察半径（%）</Label>
+                  <Input id="observation-radius" type="number" min={0} max={100} step="any" className="w-20" value={observationRadius} onChange={(event) => {
+                    if (Number.isFinite(event.target.valueAsNumber)) moveObservation(event.target.valueAsNumber)
+                  }} />
+                </div>
                 <div className="flex items-center gap-3"><Label htmlFor="zoom">预览放大</Label><Slider id="zoom" aria-label="预览放大" className="w-24" min={1} max={2} step={0.1} value={[zoom]} onValueChange={([value]) => setZoom(value)} /><span className="text-xs tabular-nums">{zoom.toFixed(1)}×</span><Button variant="ghost" size="sm" onClick={() => setZoom(1)}>复位</Button></div>
               </div>
 
-              {frame.exposureSamples >= 96 && <p role="status" className="mt-2 text-xs leading-6 text-muted-foreground">已达到曝光积分的 96 次采样上限，长拖影可能出现离散重影。请缩短曝光以提高精度。</p>}
+              {frame.exposureSamples >= MAX_EXPOSURE_SAMPLES && <p role="status" className="mt-2 text-xs leading-6 text-muted-foreground">已达到曝光积分的 {MAX_EXPOSURE_SAMPLES} 次采样上限，长拖影可能出现离散重影。请缩短曝光以提高精度。</p>}
               {fps > 60 && <p className="mt-2 text-xs leading-6 text-muted-foreground">当前采样率超过 60 fps；较低刷新率屏幕可能无法显示每一帧，可暂停后逐帧检查。</p>}
           </section>
 
@@ -174,9 +240,9 @@ export function HomePage() {
           <section className="sidebar-group" aria-labelledby="material-group-title">
             <header className="sidebar-group-heading"><h2 id="material-group-title">素材与结构</h2></header>
         <div id="plate-editor" className="sidebar-material min-w-0 space-y-4">
-          <div className="flex flex-wrap items-center gap-4"><Label>盘面类型</Label><Tabs value={multiRing ? 'rings' : 'single'} onValueChange={(value) => { reset(); setMultiRing(value === 'rings') }}><TabsList aria-label="盘面类型"><TabsTrigger value="single">单盘面</TabsTrigger><TabsTrigger value="rings">多圆环</TabsTrigger></TabsList></Tabs></div>
+          <div className="flex flex-wrap items-center gap-4"><Label>盘面类型</Label><ModeSelector label="盘面类型" value={multiRing ? 'rings' : 'single'} options={[{ value: 'single', label: '单盘面' }, { value: 'rings', label: '多圆环' }]} onChange={(value) => { reset(); setMultiRing(value === 'rings') }} /></div>
           <div hidden={multiRing}><PlateEditor idPrefix="single" material={material} geometry={geometry} onSelect={selectMaterial} onGeometryChange={changeGeometry} /></div>
-          <div hidden={!multiRing}><RingEditor rings={rings} fps={fps} rpm={liveRpm} referenceId={reference?.id} observedId={observedRing?.id} onChange={changeRings} onReference={changeReference} onObserve={observeRing} /></div>
+          <div hidden={!multiRing}><RingEditor turns={turns} variableSpeed={drive === 'cd'} rings={rings} fps={fps} rpm={liveRpm} referenceId={reference?.id} observedId={observedRing?.id} onChange={changeRings} onReference={changeReference} onObserve={observeRing} /></div>
         </div>
 
           </section>
@@ -208,7 +274,7 @@ export function HomePage() {
             </div>
             {multiRing && !reference && <p role="status" className="border-b bg-muted px-4 py-3 text-sm">没有启用圆环。请在多圆环编辑中启用至少一圈。</p>}
             {!multiRing && material.kind === 'example' && material.example === 'seam' && <p role="status" className="border-b bg-muted px-4 py-3 text-sm">接缝错误对照：最后一帧故意重复首帧。即使格距同步，仍会出现跳步和停顿。</p>}
-            <SimulatorCanvas layout={layout} mode={mode} playing={playing} fps={fps} exposure={exposure} blur={blur} guides={guides} zoom={zoom} revision={revision} transport={transport} motion={motion} onFrame={onFrame} onRotate={rotateBy} material={material} geometry={geometry} rings={multiRing ? rings : undefined} observationTarget={observationTarget} />
+            <SimulatorCanvas active={active} layout={layout} mode={mode} playing={playing} fps={fps} exposure={exposure} blur={blur} guides={guides} zoom={zoom} revision={revision} transport={transport} motion={motion} onFrame={onFrame} onRotate={rotateBy} material={material} geometry={geometry} rings={multiRing ? rings : undefined} observationName={observationTarget?.name} radius={observationRadius} onRadiusChange={moveObservation} />
 
         </div>
         <div className="workspace-status">
