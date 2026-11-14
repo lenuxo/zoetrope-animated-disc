@@ -1,5 +1,6 @@
+import { FloatingObservation } from '../components/FloatingObservation'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Columns2, Disc3, Scan, Pause, Play, RotateCcw, StepBack, StepForward } from 'lucide-react'
+import { Columns2, Disc3, Scan, SlidersHorizontal, Layers3, Focus, Pause, Play, RotateCcw, StepBack, StepForward } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -7,7 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useCallback, useImperativeHandle, useId, useState } from 'react'
+import { useCallback, useImperativeHandle, useId, useMemo, useState } from 'react'
 import type { Ref } from 'react'
 import { SimulatorCanvas } from '../components/SimulatorCanvas'
 import { CdDriveEditor } from '../components/CdDriveEditor'
@@ -19,7 +20,8 @@ import type { RingLayer } from '../simulation/rings'
 import { PlateEditor } from '../components/PlateEditor'
 import { EXAMPLES } from '../simulation/plate'
 import type { PlateGeometry, PlateMaterial, WorkbenchPlan } from '../simulation/plate'
-import type { FrameInfo, PreviewLayout, ViewMode } from '../components/SimulatorCanvas'
+import type { DeckView, DeckAction, DeckTransportState } from '../scene/turntable'
+import type { FrameInfo, ViewMode } from '../components/SimulatorCanvas'
 import { FixedRateSchedule, matchedFps, MAX_EXPOSURE_SAMPLES, PLATE, RotationTimeline, sampleMatch, turnsPerSample, Transport } from '../simulation/model'
 
 const modes: { value: ViewMode; label: string }[] = [
@@ -51,6 +53,13 @@ export function HomePage({ ref, active, initialPlan }: {
   active: boolean
   initialPlan: WorkbenchPlan | null
 }) {
+  const [controlsHost, setControlsHost] = useState<HTMLElement | null>(null)
+  const [pressedControl, setPressedControl] = useState<DeckAction | null>(null)
+  const [transportHost, setTransportHost] = useState<HTMLDivElement | null>(null)
+  const [sceneView, setSceneView] = useState<DeckView>('overview')
+  const [observationHost, setObservationHost] = useState<HTMLDivElement | null>(null)
+  const [dropMessage, setDropMessage] = useState('')
+  const [inspector, setInspector] = useState('motion')
   const [motion, setMotion] = useState<RotationTimeline | CdRotation>(() => new RotationTimeline(initialPlan?.rpm))
   const [drive, setDrive] = useState<'constant' | 'cd'>('constant')
   const [cdConfig, setCdConfig] = useState<CdConfig>({ ...DEFAULT_CD })
@@ -65,7 +74,6 @@ export function HomePage({ ref, active, initialPlan }: {
   const reference = referenceRing(rings, referenceId)
   const observedRing = rings.find((ring) => ring.enabled && ring.id === observed.id) ?? reference
   const activeGeometry = multiRing ? reference?.geometry ?? geometry : geometry
-  const [layout, setLayout] = useState<PreviewLayout>('both')
   const [mode, setMode] = useState<ViewMode>('camera')
   const [playing, setPlaying] = useState(false)
   const [rpm, setRpm] = useState(initialPlan?.rpm ?? 100 / 3)
@@ -78,6 +86,9 @@ export function HomePage({ ref, active, initialPlan }: {
   const [zoom, setZoom] = useState(1)
   const [revision, setRevision] = useState(0)
   const [frame, setFrame] = useState<FrameInfo>({ time: 0, sample: 0, sampleTime: 0, angle: 0, exposureSamples: 1 })
+  const canPrevious = mode === 'camera' && !playing && frame.sample > 0
+  const canNext = mode === 'camera' && !playing
+  const controlState = useMemo<DeckTransportState>(() => ({ playing, canPrevious, canNext, pressed: pressedControl }), [playing, canPrevious, canNext, pressedControl])
   const onFrame = useCallback((info: FrameInfo) => setFrame(info), [])
   const rotateBy = useCallback((radians: number) => {
     motion.rotateBy(radians)
@@ -184,12 +195,60 @@ export function HomePage({ ref, active, initialPlan }: {
     else setSingleRadius(radius)
   }
 
+  const selectInspector = (value: string) => {
+    setInspector(value)
+    const viewport = controlsHost?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')
+    if (viewport) viewport.scrollTop = 0
+  }
+
+  const cameraConfiguration = <div className="camera-configuration">
+            <section id="camera-settings" className="min-w-0 space-y-4 p-5" aria-labelledby="camera-title"><h3 id="camera-title" className="text-sm font-semibold">相机配置</h3>
+              <ModeSelector label="观察方式" value={mode} options={modes} onChange={changeMode} />
+                <div className="flex items-center gap-2"><Switch id="blur" checked={blur} disabled={mode !== 'continuous'} onCheckedChange={setBlur} /><Label htmlFor="blur">连续旋转拖影</Label></div>
+
+              <div className="flex items-center justify-between gap-3"><Label htmlFor="auto-fps">{drive === 'cd' ? '匹配起始转速' : '自动匹配'}</Label><Switch id="auto-fps" checked={automatic} onCheckedChange={(checked) => { setManualFps(fps); setAutomatic(checked) }} /></div>
+              {drive === 'cd' && <div className="space-y-2"><p className="text-xs leading-5 text-muted-foreground">相机保持固定帧率，不随电机变速。起始匹配后出现漂移是预期现象。</p><Button variant="outline" size="sm" onClick={() => { setManualFps(matchedFps(liveRpm, activeGeometry.slots)); setAutomatic(false) }}>匹配当前转速</Button></div>}
+              <div className="flex items-center justify-between gap-3"><Label htmlFor="camera-fps">采样率</Label><div className="flex items-center gap-2"><Input id="camera-fps" type="number" min="0.1" max={maxFps} step="any" value={Number(fps.toFixed(3))} disabled={automatic} onChange={(event) => { const value = Number(event.target.value); if (value >= 0.1 && value <= maxFps) setManualFps(value) }} className="w-24 text-right tabular-nums" /><span className="text-xs text-muted-foreground">fps</span></div></div>
+              <Slider aria-label="手动采样率" min={0.1} max={maxFps} step={0.1} value={[fps]} disabled={automatic} onValueChange={([value]) => setManualFps(value)} />
+              <div className="flex items-center justify-between gap-3"><Label htmlFor="shutter" className="shrink-0">曝光时间</Label><Select value={shutter} onValueChange={setShutter}><SelectTrigger size="sm" id="shutter" aria-label="曝光时间" className="w-40"><SelectValue /></SelectTrigger><SelectContent>{exposures.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select></div>
+              <p className="text-xs leading-5 text-muted-foreground">实际 {(exposure * 1000).toFixed(2)} ms · 上限为一个采样周期</p>
+              <div className="flex flex-wrap items-center justify-between gap-1 rounded-md bg-muted px-2 py-2 text-xs" data-testid="sync-status"><strong className="flex items-center gap-1.5 font-medium"><span className={`size-1.5 rounded-full ${match.synchronized ? 'bg-primary' : 'bg-destructive'}`} />{multiRing && !reference ? '没有启用圆环' : match.label}</strong><span className="text-muted-foreground tabular-nums">{match.advance.toFixed(3)} 格 / 采样</span></div>
+            </section>
+          <section className="sidebar-subsection" aria-labelledby="experiments-title"><h3 id="experiments-title" className="mb-3 text-sm font-semibold">快速实验</h3>
+            <div className="flex flex-wrap items-center gap-2"><Button variant="secondary" size="sm" onClick={() => { changeMode('camera'); setManualFps(matchedFps(liveRpm, activeGeometry.slots) * 1.02); setAutomatic(false); setShutter('0.001') }}>轻微失配</Button><Button variant="secondary" size="sm" onClick={() => { changeMode('camera'); setShutter('frame') }}>延长曝光</Button><Button variant="ghost" size="sm" onClick={() => { changeMode('camera'); setAutomatic(true); setShutter('0.001') }}>{drive === 'cd' ? '恢复起始匹配' : '恢复清晰同步'}</Button></div>
+          </section>
+  </div>
+
   return (
-    <div className="workbench">
-      <aside aria-label="工作台配置" className="workbench-sidebar">
+    <div className="workbench" data-view={sceneView} data-inspector={inspector}
+      onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}
+      onDrop={event => {
+        if (!event.dataTransfer.files.length) return
+        event.preventDefault()
+        selectInspector('material')
+        const prefix = multiRing && observedRing ? `ring-${observedRing.id}` : 'single'
+        const input = document.querySelector<HTMLInputElement>(`#${prefix}-editor input[type="file"]`)
+        if (!input) { setDropMessage('请先展开目标圆环，再拖入图片。'); return }
+        input.files = event.dataTransfer.files
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+        setDropMessage('')
+      }}>
+      {dropMessage && <p role="status" className="drop-feedback">{dropMessage}</p>}
+      <FloatingObservation settings={cameraConfiguration}><div ref={setObservationHost} className="inspector-monitor" /></FloatingObservation>
+      <aside ref={setControlsHost} aria-label="工作台配置" className="workbench-sidebar instrument-controls">
+        <div className="instrument-panel-heading"><span>实验控制</span><span className="operator-panel-indicator">●</span></div>
+        <div className="inspector-tabs" role="group" aria-label="参数面板">
+          {([
+            ['motion', '运动参数', SlidersHorizontal, '参数'],
+            ['material', '素材与结构', Layers3, '素材'],
+            ['inspection', '检查工具', Focus, '检查'],
+          ] as const).map(([value, label, Icon, text]) => <Tooltip key={value}><TooltipTrigger asChild>
+            <Button size="sm" variant={inspector === value ? 'secondary' : 'ghost'} aria-label={label} aria-pressed={inspector === value} onClick={() => selectInspector(value)}><Icon className="size-4" /><span>{text}</span></Button>
+          </TooltipTrigger><TooltipContent side="left">{label}</TooltipContent></Tooltip>)}
+        </div>
         <ScrollArea className="sidebar-scroll" type="scroll" scrollHideDelay={600}>
-          <section className="sidebar-group" aria-labelledby="playback-group-title">
-            <header className="sidebar-group-heading"><h2 id="playback-group-title">运动与采样</h2></header>
+          <section className="sidebar-group" data-panel="motion" hidden={inspector !== 'motion'} aria-label="运动参数">
+
           <div className="sidebar-parameters">
             <section id="motion-settings" className="min-w-0 space-y-4 p-5" aria-labelledby="motion-title"><h3 id="motion-title" className="text-sm font-semibold">唱片运动</h3>
               <ModeSelector label="旋转驱动" value={drive} options={[{ value: 'constant', label: '恒定转速' }, { value: 'cd', label: 'CD 受控变速' }]} onChange={(value) => applyDrive(value)} />
@@ -201,29 +260,17 @@ export function HomePage({ ref, active, initialPlan }: {
               </div> : motion instanceof CdRotation && <CdDriveEditor model={motion} time={renderedTime} onApply={(config) => applyDrive('cd', config)} />}
               <div className="flex items-center justify-between gap-3"><Label htmlFor="direction">旋转方向</Label><Select value={String(direction)} onValueChange={(value) => drive === 'cd' ? applyDrive('cd', cdConfig, Number(value)) : changeSpeed(rpm, Number(value))}><SelectTrigger size="sm" id="direction" aria-label="旋转方向" className="w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="1">顺时针</SelectItem><SelectItem value="-1">逆时针</SelectItem></SelectContent></Select></div>
             </section>
-            <section id="camera-settings" className="min-w-0 space-y-4 p-5" aria-labelledby="camera-title"><h3 id="camera-title" className="text-sm font-semibold">相机配置</h3>
-              <ModeSelector label="观察方式" value={mode} options={modes} onChange={changeMode} />
 
-              <div className="flex items-center justify-between gap-3"><Label htmlFor="auto-fps">{drive === 'cd' ? '匹配起始转速' : '自动匹配'}</Label><Switch id="auto-fps" checked={automatic} onCheckedChange={(checked) => { setManualFps(fps); setAutomatic(checked) }} /></div>
-              {drive === 'cd' && <div className="space-y-2"><p className="text-xs leading-5 text-muted-foreground">相机保持固定帧率，不随电机变速。起始匹配后出现漂移是预期现象。</p><Button variant="outline" size="sm" onClick={() => { setManualFps(matchedFps(liveRpm, activeGeometry.slots)); setAutomatic(false) }}>匹配当前转速</Button></div>}
-              <div className="flex items-center justify-between gap-3"><Label htmlFor="camera-fps">采样率</Label><div className="flex items-center gap-2"><Input id="camera-fps" type="number" min="0.1" max={maxFps} step="any" value={Number(fps.toFixed(3))} disabled={automatic} onChange={(event) => { const value = Number(event.target.value); if (value >= 0.1 && value <= maxFps) setManualFps(value) }} className="w-24 text-right tabular-nums" /><span className="text-xs text-muted-foreground">fps</span></div></div>
-              <Slider aria-label="手动采样率" min={0.1} max={maxFps} step={0.1} value={[fps]} disabled={automatic} onValueChange={([value]) => setManualFps(value)} />
-              <div className="flex items-center justify-between gap-3"><Label htmlFor="shutter" className="shrink-0">曝光时间</Label><Select value={shutter} onValueChange={setShutter}><SelectTrigger size="sm" id="shutter" aria-label="曝光时间" className="w-40"><SelectValue /></SelectTrigger><SelectContent>{exposures.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select></div>
-              <p className="text-xs leading-5 text-muted-foreground">实际 {(exposure * 1000).toFixed(2)} ms · 上限为一个采样周期</p>
-              <div className="flex flex-wrap items-center justify-between gap-1 rounded-md bg-muted px-2 py-2 text-xs" data-testid="sync-status"><strong className="flex items-center gap-1.5 font-medium"><span className={`size-1.5 rounded-full ${match.synchronized ? 'bg-primary' : 'bg-destructive'}`} />{multiRing && !reference ? '没有启用圆环' : match.label}</strong><span className="text-muted-foreground tabular-nums">{match.advance.toFixed(3)} 格 / 采样</span></div>
-            </section>
           </div>
-          <section className="sidebar-subsection" aria-labelledby="experiments-title"><h3 id="experiments-title" className="mb-3 text-sm font-semibold">快速实验</h3>
-            <div className="flex flex-wrap items-center gap-2"><Button variant="secondary" size="sm" onClick={() => { changeMode('camera'); setManualFps(matchedFps(liveRpm, activeGeometry.slots) * 1.02); setAutomatic(false); setShutter('0.001') }}>轻微失配</Button><Button variant="secondary" size="sm" onClick={() => { changeMode('camera'); setShutter('frame') }}>延长曝光</Button><Button variant="ghost" size="sm" onClick={() => { changeMode('camera'); setAutomatic(true); setShutter('0.001') }}>{drive === 'cd' ? '恢复起始匹配' : '恢复清晰同步'}</Button></div>
+
           </section>
-          </section>
-          <section className="sidebar-group" aria-labelledby="view-group-title">
-            <header className="sidebar-group-heading"><h2 id="view-group-title">观察与检查</h2></header>
+          <section className="sidebar-group" data-panel="inspection" hidden={inspector !== 'inspection'} aria-label="观察与检查">
+
           <section aria-labelledby="inspection-title" className="sidebar-subsection">
               <h3 id="inspection-title" className="mb-4 flex items-center gap-2 text-sm font-semibold">检查工具</h3>
               <div className="flex flex-col items-start gap-4 pb-4">
                 <div className="flex items-center gap-2"><Switch id="guides" checked={guides} onCheckedChange={setGuides} /><Label htmlFor="guides">{multiRing ? '各圈位置与动作帧编号' : material.kind === 'image' ? '圆周位置编号（声明格数）' : '位置与动作帧编号'}</Label></div>
-                <div className="flex items-center gap-2"><Switch id="blur" checked={blur} disabled={mode !== 'continuous'} onCheckedChange={setBlur} /><Label htmlFor="blur">连续旋转拖影</Label></div>
+
                 <div className="flex items-center gap-2"><Label htmlFor="observation-radius">观察半径（%）</Label>
                   <Input id="observation-radius" type="number" min={0} max={100} step="any" className="w-20" value={observationRadius} onChange={(event) => {
                     if (Number.isFinite(event.target.valueAsNumber)) moveObservation(event.target.valueAsNumber)
@@ -237,8 +284,8 @@ export function HomePage({ ref, active, initialPlan }: {
           </section>
 
           </section>
-          <section className="sidebar-group" aria-labelledby="material-group-title">
-            <header className="sidebar-group-heading"><h2 id="material-group-title">素材与结构</h2></header>
+          <section className="sidebar-group" data-panel="material" hidden={inspector !== 'material'} aria-label="素材与结构">
+
         <div id="plate-editor" className="sidebar-material min-w-0 space-y-4">
           <div className="flex flex-wrap items-center gap-4"><Label>盘面类型</Label><ModeSelector label="盘面类型" value={multiRing ? 'rings' : 'single'} options={[{ value: 'single', label: '单盘面' }, { value: 'rings', label: '多圆环' }]} onChange={(value) => { reset(); setMultiRing(value === 'rings') }} /></div>
           <div hidden={multiRing}><PlateEditor idPrefix="single" material={material} geometry={geometry} onSelect={selectMaterial} onGeometryChange={changeGeometry} /></div>
@@ -246,42 +293,55 @@ export function HomePage({ ref, active, initialPlan }: {
         </div>
 
           </section>
-          <p className="p-5 text-xs leading-5 text-muted-foreground">模拟固定帧率相机与全局快门。曝光通过旋转位置加权累积近似生成，不使用页面频闪。</p>
+
         </ScrollArea>
+        <div className="workspace-status" aria-label="实验运行状态">
+          <span role="status" className="flex shrink-0 items-center gap-1.5 text-xs"><span className={`size-1.5 rounded-full ${playing ? 'bg-primary' : 'bg-muted-foreground'}`} />{playing ? '正在播放' : '已暂停'}</span>
+          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{mode === 'camera' ? '相机采样' : '连续旋转'} · {drive === 'cd' ? 'CD · ' : ''}{displayRpm(liveRpm)} RPM · {Number(fps.toFixed(3))} fps · {(exposure * 1000).toFixed(2)} ms</span>
+          <details className="sampling-details"><summary>采样详情</summary><output data-testid="simulation-metrics" className="ml-auto text-xs text-muted-foreground tabular-nums">时间 {frame.time.toFixed(3)} s · 帧 {frame.sample} @ {frame.sampleTime.toFixed(3)} s · 角度 {((frame.angle * 180 / Math.PI % 360 + 360) % 360).toFixed(2)}° · 积分 {frame.exposureSamples} 次</output></details>
+        </div>
       </aside>
+      <nav className="scene-navigation" aria-label="仪器视角">
+        {([
+          ['overview', '全景', Columns2],
+          ['disc', '盘面俯视', Disc3],
+          ['monitor', '观察特写', Scan],
+        ] as const).map(([value, label, Icon]) => <Button key={value} variant={sceneView === value ? 'secondary' : 'ghost'} size="sm" aria-pressed={sceneView === value} onClick={() => setSceneView(value)}><Icon />{label}</Button>)}
+      </nav>
       <section id="simulator" aria-label="Zoetrope 模拟器" className="workbench-main">
         <div className="flex min-h-12 items-center justify-between gap-4 border-b px-5">
-          <h1 className="text-sm font-semibold">盘面工作区</h1>
+          <h1 className="text-sm font-semibold">唱片工作台</h1>
           <div className="flex min-w-0 items-center gap-3 text-xs text-muted-foreground"><span className="max-w-48 truncate">{multiRing ? `多圆环 · ${rings.filter((ring) => ring.enabled).length}/${rings.length} 圈启用` : materialName}</span><span>{multiRing ? `同步参考：${reference?.name ?? '无'}` : `${geometry.slots} 格 / ${geometry.frames} 帧 × ${geometry.repeats}`}</span></div>
         </div>
         <div className="workbench-preview">
-            <div className="workspace-transport">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button onClick={() => setPlaying((value) => !value)} className="min-w-24">{playing ? <Pause /> : <Play />}{playing ? '暂停' : '播放'}</Button>
-                <Tooltip><TooltipTrigger asChild><Button variant="outline" size="icon" aria-label="上一采样帧" disabled={mode !== 'camera' || playing || frame.sample === 0} onClick={() => step(-1)}><StepBack /></Button></TooltipTrigger><TooltipContent>上一采样帧</TooltipContent></Tooltip>
-                <Tooltip><TooltipTrigger asChild><Button variant="outline" size="icon" aria-label="下一采样帧" disabled={mode !== 'camera' || playing} onClick={() => step(1)}><StepForward /></Button></TooltipTrigger><TooltipContent>下一采样帧</TooltipContent></Tooltip>
-                <Button variant="ghost" size="sm" onClick={reset}><RotateCcw />回到起点</Button>
-              </div>
-              <div role="group" aria-label="预览布局" className="flex max-w-full flex-wrap gap-1 rounded-lg bg-muted p-1">
-                {([
-                  { value: 'both', label: '联合观察', icon: Columns2 },
-                  { value: 'observation', label: '仅观察窗', icon: Scan },
-                  { value: 'record', label: '仅盘片', icon: Disc3 },
-                ] as const).map(({ value, label, icon: Icon }) => (
-                  <Button key={value} variant={layout === value ? 'secondary' : 'ghost'} size="sm" className={layout === value ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground'} aria-pressed={layout === value} onClick={() => setLayout(value)}><Icon />{label}</Button>
-                ))}
-              </div>
+            <div ref={setTransportHost} className="machine-transport" role="group" aria-label="唱机实体按键">
+              {([
+                { action: 'play', label: playing ? '暂停' : '播放', Icon: playing ? Pause : Play, disabled: false, active: playing, run: () => setPlaying(value => !value) },
+                { action: 'previous', label: '上一采样帧', text: '上一帧', Icon: StepBack, disabled: !canPrevious, run: () => step(-1) },
+                { action: 'next', label: '下一采样帧', text: '下一帧', Icon: StepForward, disabled: !canNext, run: () => step(1) },
+                { action: 'reset', label: '复位', Icon: RotateCcw, disabled: false, run: reset },
+              ] as const).map(key => <Button key={key.action} data-action={key.action} variant="ghost" aria-label={key.label}
+                aria-pressed={'active' in key ? key.active : undefined} disabled={key.disabled}
+                onPointerDown={event => { setPressedControl(key.action); event.currentTarget.setPointerCapture(event.pointerId) }}
+                onPointerUp={() => setPressedControl(null)} onPointerCancel={() => setPressedControl(null)} onLostPointerCapture={() => setPressedControl(null)}
+                onKeyDown={event => { if (event.key === ' ' || event.key === 'Enter') setPressedControl(key.action) }}
+                onKeyUp={() => setPressedControl(null)} onBlur={() => setPressedControl(null)}
+                onClick={() => { setPressedControl(null); key.run() }}>
+                <key.Icon /><span className="machine-button-label">{'text' in key ? key.text : key.label}</span>
+              </Button>)}
             </div>
             {multiRing && !reference && <p role="status" className="border-b bg-muted px-4 py-3 text-sm">没有启用圆环。请在多圆环编辑中启用至少一圈。</p>}
             {!multiRing && material.kind === 'example' && material.example === 'seam' && <p role="status" className="border-b bg-muted px-4 py-3 text-sm">接缝错误对照：最后一帧故意重复首帧。即使格距同步，仍会出现跳步和停顿。</p>}
-            <SimulatorCanvas active={active} layout={layout} mode={mode} playing={playing} fps={fps} exposure={exposure} blur={blur} guides={guides} zoom={zoom} revision={revision} transport={transport} motion={motion} onFrame={onFrame} onRotate={rotateBy} material={material} geometry={geometry} rings={multiRing ? rings : undefined} observationName={observationTarget?.name} radius={observationRadius} onRadiusChange={moveObservation} />
+            <SimulatorCanvas controlState={controlState} view={sceneView} onViewChange={setSceneView} controlsHost={controlsHost} transportHost={transportHost} onInspectDisc={radius => {
+              selectInspector('material')
+              if (multiRing) {
+                const ring = rings.find(item => item.enabled && radius >= item.inner && radius <= item.outer)
+                if (ring) observeRing(ring.id)
+              }
+            }} observationHost={observationHost} onPlay={() => setPlaying(value => !value)} active={active} mode={mode} playing={playing} fps={fps} exposure={exposure} blur={blur} guides={guides} zoom={zoom} revision={revision} transport={transport} motion={motion} onFrame={onFrame} onRotate={rotateBy} material={material} geometry={geometry} rings={multiRing ? rings : undefined} observationName={observationTarget?.name} radius={observationRadius} onRadiusChange={moveObservation} />
 
         </div>
-        <div className="workspace-status">
-          <span role="status" className="flex shrink-0 items-center gap-1.5 text-xs"><span className={`size-1.5 rounded-full ${playing ? 'bg-primary' : 'bg-muted-foreground'}`} />{playing ? '正在播放' : '已暂停'}</span>
-          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{mode === 'camera' ? '相机采样' : '连续旋转'} · {drive === 'cd' ? 'CD · ' : ''}{displayRpm(liveRpm)} RPM · {Number(fps.toFixed(3))} fps · {(exposure * 1000).toFixed(2)} ms</span>
-              <output data-testid="simulation-metrics" className="ml-auto text-xs text-muted-foreground tabular-nums">时间 {frame.time.toFixed(3)} s · 帧 {frame.sample} @ {frame.sampleTime.toFixed(3)} s · 角度 {((frame.angle * 180 / Math.PI % 360 + 360) % 360).toFixed(2)}° · 积分 {frame.exposureSamples} 次</output>
-        </div>
+
       </section>
     </div>
   )

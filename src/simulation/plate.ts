@@ -8,8 +8,7 @@ export type PlateMaterial =
 
 export const EXAMPLES: { id: ExampleId; name: string; description: string; geometry: PlateGeometry }[] = [
   { id: 'bounce', name: '弹跳', description: '平滑弹跳循环，适合观察同步与曝光。', geometry: { slots: 54, frames: 18, repeats: 3 } },
-  { id: 'sequence', name: '转臂与计数', description: '编号从 01 递增，转臂连续转动。倒放时编号递减；末帧→01 的转臂应连续。', geometry: { slots: 48, frames: 12, repeats: 4 } },
-  { id: 'seam', name: '错误接缝对照', description: '故意把最后一帧替换成首帧：接缝前跳步，再连续两次 01 停顿。用于对比接缝错误。', geometry: { slots: 48, frames: 12, repeats: 4 } },
+  { id: 'sequence', name: '计数', description: '编号从 01 递增，转臂连续转动。倒放时编号递减；末帧→01 的转臂应连续。', geometry: { slots: 48, frames: 12, repeats: 4 } },
 ]
 
 export function geometryError({ slots, frames, repeats }: PlateGeometry): string | null {
