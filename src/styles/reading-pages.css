@@ -1,0 +1,85 @@
+/* Reading pages share the workbench's slate environment and operator surfaces. */
+.app-shell.studio-reading {
+  --background: #243247; --card: #2b3b52; --popover: #293a50;
+  --foreground: #f1f5fc; --muted-foreground: #c6d2e2; --muted: #ffffff0c;
+  --primary: #d9e7ff; --primary-foreground: #25354d; --secondary: #ffffff16;
+  --border: #ffffff20; --input: #ffffff35; --accent: #ffffff20; --ring: #b5d0ff;
+  --control-height: 36px; --control-font-size: 13px;
+  color: var(--foreground); color-scheme: dark;
+  background: radial-gradient(ellipse at 48% 16%, #4b5a70, #303e52 56%, #253145);
+}
+.dark .app-shell.studio-reading { background: radial-gradient(ellipse at 48% 16%, #36455c, #253347 56%, #192638); }
+.app-shell.studio-reading > header { color: #edf3fc; background: #303d4ce8; border-color: #ffffff18; backdrop-filter: blur(24px); }
+.app-shell.studio-reading > header > a > span:first-child { background: #2258d9; color: #fff; border-radius: 12px; }
+.app-shell.studio-reading > header .text-muted-foreground { color: #c1ccdc; }
+.studio-reading .nav-link { color: #c1ccdc; border-radius: 24px; }
+.studio-reading .nav-link:hover { background: #ffffff12; color: #fff; }
+.studio-reading .nav-link[aria-current="page"] { background: #ffffff20; color: #fff; }
+.studio-reading .content-main { padding: 44px 40px 64px; scrollbar-color: #9bb0cc66 transparent; }
+.studio-reading .guide-intro { gap: 48px; padding-bottom: 40px; }
+.studio-reading .guide-kicker { color: #c9dbf6; font-size: 13px; font-weight: 500; }
+.studio-reading .guide-intro h1 { color: #f5f8fd; font-size: 34px; line-height: 1.45; }
+.studio-reading :is(.guide-start, .guide-contents nav, .about-aside) {
+  border: 1px solid #ffffff26; border-radius: 20px; background: #a5b6d21a;
+  box-shadow: inset 0 1px 0 #ffffff30, 0 12px 30px #14203626;
+  backdrop-filter: blur(24px) saturate(1.15);
+}
+.studio-reading .guide-start { padding: 24px; }
+.studio-reading .guide-start > p { margin-bottom: 18px; }
+.studio-reading .guide-contents nav { padding: 14px 10px; align-items: stretch; }
+.studio-reading .guide-contents a { border-radius: 12px; color: #d5dfed; }
+.studio-reading .guide-contents a:hover { background: #ffffff12; color: #fff; }
+.studio-reading .guide-contents .is-complete { color: #d0e1ff; background: #d0e1ff0d; }
+.studio-reading .guide-nav-step { background: #18283d33; }
+.studio-reading .guide-task-title > span { background: #d8e5f01a; color: #e0ebfc; border-color: #ffffff30; }
+.studio-reading .guide-article { color: #e4ebf5; line-height: 1.95; }
+.studio-reading .guide-article h2 { color: #f4f7fd; font-size: 22px; }
+.studio-reading .guide-article h3 { color: #edf3fc; }
+.studio-reading .guide-article section { border-color: #ffffff1c; }
+.studio-reading :is(.guide-planner, .guide-demo) { background: #1c2b40a6; border-color: #ffffff26; border-radius: 16px; box-shadow: inset 0 1px 0 #ffffff12; }
+.studio-reading :is(.guide-note, .guide-formula, .guide-current-plan, .guide-delivery-plan) { background: #d3e2f30c; border-radius: 12px; }
+.studio-reading .guide-checkpoint { border-color: #ffffff26; background: #b3c7e610; border-radius: 14px; }
+.studio-reading .guide-checkpoint input { accent-color: #bed4f6; }
+.studio-reading .guide-disclosure > summary { color: #d4dfef; }
+.studio-reading .guide-demo [data-slot="slider-track"] { background: #ffffff24; }
+.studio-reading .guide-demo [data-slot="slider-thumb"] { background: #edf4ff; border-color: #edf4ff; }
+.studio-reading .guide-frame-strip button { border-color: #ffffff26; border-radius: 8px; }
+.studio-reading .guide-frame-strip button[aria-pressed="true"] { background: #d9e7ff26; }
+.studio-reading :is(.guide-layout-lab, .guide-sampling-disc, .guide-sampling-lens) { border-color: #ffffff26; }
+.studio-reading .guide-planner-controls { gap: 16px; }
+.studio-reading .guide-table-wrap { border: 1px solid var(--border); border-radius: 12px; }
+.studio-reading .guide-article th, .studio-reading .guide-article td { border-color: #ffffff20; }
+.studio-reading .guide-article thead { background: #d5e3f512; }
+.about-page { max-width: 1080px; margin: 12px auto 0; }
+.about-intro { max-width: 700px; padding-bottom: 36px; }
+.about-intro > p:first-child { margin-bottom: 16px; color: #c9dbf6; font-size: 13px; }
+.about-intro h1 { font-size: 34px; font-weight: 650; letter-spacing: -0.025em; }
+.about-intro .about-lead { margin-top: 20px; max-width: 52ch; color: #d2deec; line-height: 1.95; }
+.about-body { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, 1fr); gap: 64px; align-items: start; padding-top: 36px; border-top: 1px solid var(--border); }
+.about-copy section + section { margin-top: 28px; padding-top: 28px; border-top: 1px solid var(--border); }
+.about-copy h2 { margin-bottom: 12px; font-size: 16px; font-weight: 600; }
+.about-copy p { color: #d2deec; font-size: 14px; line-height: 1.95; text-wrap: pretty; }
+.about-aside { padding: 22px; }
+.about-aside figure > svg { display: block; width: 100%; height: auto; }
+.about-aside figcaption { margin: 12px 0 22px; color: #d2deec; font-size: 12px; line-height: 1.8; }
+.about-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+@media (max-width: 1000px) {
+  .studio-reading .content-main { padding: 30px 24px 48px; }
+  .studio-reading .guide-intro { gap: 28px; }
+  .about-body { gap: 32px; }
+}
+@media (max-width: 700px) {
+  .app-shell.studio-reading > header { height: 48px; min-height: 48px; flex-wrap: nowrap; padding: 0 8px; gap: 4px; }
+  .app-shell.studio-reading > header > div { gap: 4px; }
+  .app-shell.studio-reading .nav-link { padding: 7px 6px; font-size: 12px; }
+  .studio-reading .content-main { padding: 24px 16px 40px; }
+  .studio-reading .guide-intro h1, .about-intro h1 { font-size: 28px; }
+  .studio-reading .guide-intro { gap: 24px; padding-bottom: 28px; }
+  .studio-reading .guide-start { padding: 20px; }
+  .studio-reading .guide-contents nav { padding: 12px; }
+  .studio-reading .guide-planner { padding: 16px; }
+  .studio-reading .guide-planner-controls .guide-control-field { min-width: 0; width: 100%; }
+  .studio-reading .guide-demo { padding: 14px; }
+  .about-body { grid-template-columns: 1fr; gap: 28px; padding-top: 28px; }
+  .about-intro { padding-bottom: 28px; }
+}

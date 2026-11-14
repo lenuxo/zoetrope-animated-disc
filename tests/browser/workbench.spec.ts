@@ -104,11 +104,11 @@ test('the CD reference ring and the camera report the same sampled motion', asyn
   await openView(page, '转速与相机')
   await page.getByText('CD 受控变速', { exact: true }).click()
   await openView(page, '素材与圆环')
-  await page.getByRole('tab', { name: '采样检查' }).click()
+  await page.getByRole('button', { name: '展开外圈设置', exact: true }).click()
   await operate(page, '下一采样帧')
   await expect(page.getByTestId('simulation-metrics')).toContainText('帧 1 @')
   await expect(page.getByTestId('sync-status')).toContainText('近似逐格同步')
-  await expect(page.getByRole('tabpanel', { name: '采样检查' })).toContainText('本圈近似逐格同步')
+  await expect(page.getByRole('region', { name: '外圈采样检查', exact: true })).toContainText('本圈近似逐格同步')
 })
 
 test('changing a guide plan reopens downstream checks and transfers settings once', async ({ page }) => {
@@ -161,7 +161,7 @@ test('observation radius follows numeric input, frame dragging and ring selectio
   await page.getByRole('button', { name: '检查工具', exact: true }).click()
   await input.fill('30')
   await openView(page, '素材与圆环')
-  await page.getByRole('button', { name: '观察此圈' }).click()
+  await page.getByRole('region', { name: '外圈圆环', exact: true }).getByRole('button', { name: '观察此圈' }).click()
   await expect(input).toHaveValue('85')
 })
 
@@ -202,6 +202,7 @@ test('renaming preserves the playhead and guides reuse projected ring pixels', a
   await operate(page, '下一采样帧')
   await expect(page.getByTestId('simulation-metrics')).toContainText('帧 1 @')
   await openView(page, '素材与圆环')
+  await page.getByRole('button', { name: '展开外圈设置', exact: true }).click()
   const ring = page.getByRole('region', { name: '外圈圆环' })
   await ring.getByText('管理此圈').click()
   await ring.getByRole('textbox', { name: '圆环名称' }).fill('弹跳外圈')
@@ -209,7 +210,6 @@ test('renaming preserves the playhead and guides reuse projected ring pixels', a
   await expect(page.getByRole('region', { name: '弹跳外圈圆环' })).toBeVisible()
   await expect(page.getByTestId('simulation-metrics')).toContainText('帧 1 @')
   await expect(page.locator('body')).toHaveAttribute('data-source-reads', '3')
-  await page.getByRole('tab', { name: '位置映射' }).click()
   await page.getByRole('spinbutton', { name: '相位偏移（°）' }).fill('10')
   await page.getByRole('button', { name: '应用位置' }).click()
   await expect(page.locator('body')).toHaveAttribute('data-source-reads', '4')

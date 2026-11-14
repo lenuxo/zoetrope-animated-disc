@@ -11,6 +11,7 @@ type Props = {
   material: PlateMaterial
   idPrefix?: string
   embedded?: boolean
+  advanced?: boolean
   geometry: PlateGeometry
   onSelect: (material: PlateMaterial, geometry?: PlateGeometry) => void
   onGeometryChange: (geometry: PlateGeometry) => void
@@ -19,7 +20,7 @@ const calibrationFields = (c: Calibration) => ({ centerX: String(c.centerX), cen
 const geometryFields = (g: PlateGeometry) => ({ slots: String(g.slots), frames: String(g.frames), repeats: String(g.repeats) })
 const parsedNumber = (value: string) => value.trim() === '' ? NaN : Number(value)
 
-export const PlateEditor = memo(function PlateEditor({ material, geometry, onSelect, onGeometryChange, idPrefix = 'plate', embedded = false }: Props) {
+export const PlateEditor = memo(function PlateEditor({ material, geometry, onSelect, onGeometryChange, idPrefix = 'plate', embedded = false, advanced = true }: Props) {
   const editorId = `${idPrefix}-editor`
   const calibrationPrefix = idPrefix === 'plate' ? 'calibration' : `${idPrefix}-calibration`
   const [uploaded, setUploaded] = useState<UploadedPlate | null>(null)
@@ -119,30 +120,30 @@ export const PlateEditor = memo(function PlateEditor({ material, geometry, onSel
   const calibrationChanged = imageMaterial && Object.keys(calibration).some((key) => calibration[key as keyof Calibration] !== imageMaterial.calibration[key as keyof Calibration])
 
   return (
-    <section id={editorId} aria-labelledby={embedded ? undefined : `${editorId}-title`} aria-label={embedded ? '本圈素材与循环' : undefined} className="plate-editor min-w-0">
+    <section id={editorId} aria-labelledby={embedded ? undefined : `${editorId}-title`} aria-label={embedded ? '本圈素材与循环' : undefined} className="plate-editor min-w-0" data-embedded={embedded}>
       {!embedded && <div className="flex flex-wrap items-center justify-between gap-3 pb-4">
-        <div><h3 id={`${editorId}-title`} className="flex items-center gap-2 text-sm font-semibold"><Disc3 className="size-4" />盘面素材与校准</h3><p className="mt-1.5 text-xs leading-5 text-muted-foreground">应用素材、校准或排布配置时，预览会暂停并回到起点。</p></div>
+        <div><h3 id={`${editorId}-title`} className="flex items-center gap-2 text-sm font-semibold"><Disc3 className="size-4" />盘面素材</h3></div>
 
       </div>}
-      <div className="space-y-5">
-        <div>
+      <div className="plate-editor-body space-y-5">
+        <div className="plate-source">
           <Label className="mb-3 block">{embedded ? '本圈素材' : '内置示例'}</Label>
           <div role="group" aria-label="盘面示例" className="flex flex-wrap gap-2">
             {EXAMPLES.map((example) => <Button key={example.id} variant={material.kind === 'example' && material.example === example.id ? 'default' : 'outline'} aria-pressed={material.kind === 'example' && material.example === example.id} size="sm" onClick={() => {
               request.current.value++; setBusy(false); setError(''); setGeometryDraft(geometryFields(example.geometry)); onSelect({ kind: 'example', example: example.id }, { ...example.geometry })
             }}>{example.name}</Button>)}
           </div>
-          <p className="mt-3 text-xs leading-5 text-muted-foreground">{material.kind === 'example' ? EXAMPLES.find((example) => example.id === material.example)!.description : `当前使用：${material.name}`}</p>
+          <p hidden={embedded && material.kind === 'example'} className="mt-3 text-xs leading-5 text-muted-foreground">{material.kind === 'example' ? EXAMPLES.find((example) => example.id === material.example)!.description : `当前使用：${material.name}`}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3 border-t pt-5">
+        <div className="plate-upload flex flex-wrap items-center gap-3 border-t pt-5">
           <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" tabIndex={-1} aria-hidden="true" className="sr-only" aria-label="上传盘面图片" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) loadFile(file) }} />
-          <Button variant="outline" onClick={() => fileRef.current?.click()}><Upload className="size-4" />{busy ? '正在读取图片…' : '上传盘面图片'}</Button>
+          <Button variant="outline" onClick={() => fileRef.current?.click()}><Upload className="size-4" />{busy ? '正在读取图片…' : embedded ? '上传' : '上传盘面图片'}</Button>
           {uploaded && material.kind !== 'image' && <Button variant="secondary" onClick={() => { request.current.value++; setBusy(false); setDraft(calibrationFields(uploaded.calibration)); setGeometryDraft(geometryFields(uploadedGeometry.current)); onSelect(uploaded, { ...uploadedGeometry.current }) }}>使用已上传图片</Button>}
-          <p className="text-xs leading-5 text-muted-foreground">PNG / JPEG / WebP，最大 20 MB、2400 万像素。导入时固定为静态画面，仅本地处理；刷新后需重新选择。</p>
+          <p hidden={embedded} className="text-xs leading-5 text-muted-foreground">PNG / JPEG / WebP，最大 20 MB、2400 万像素。导入时固定为静态画面，仅本地处理；刷新后需重新选择。</p>
           {error && <p role="alert" className="w-full text-sm text-destructive">{error}</p>}
         </div>
 
-        {imageMaterial && <div className="grid min-w-0 gap-5 border-t pt-5">
+        {imageMaterial && <div id={`${editorId}-calibration`} hidden={embedded && !advanced} className="plate-calibration grid min-w-0 gap-5 border-t pt-5">
           <div className="min-w-0">
             <div role="group" aria-label="图片校准操作" className="mb-3 flex flex-wrap gap-2">
               <Button size="sm" variant={calibrationMode === 'center' ? 'default' : 'outline'} aria-pressed={calibrationMode === 'center'} onClick={() => setCalibrationMode('center')}><Crosshair className="size-4" />设置圆心</Button>
@@ -178,7 +179,7 @@ export const PlateEditor = memo(function PlateEditor({ material, geometry, onSel
           </form>
         </div>}
 
-        <form className="space-y-4 border-t pt-5" onSubmit={(event) => { event.preventDefault(); if (!geometryIssue) { if (material.kind === 'image') uploadedGeometry.current = { ...proposed }; onGeometryChange(proposed) } }}>
+        <form id={`${editorId}-geometry`} hidden={embedded && !advanced} className="plate-geometry space-y-4 border-t pt-5" onSubmit={(event) => { event.preventDefault(); if (!geometryIssue) { if (material.kind === 'image') uploadedGeometry.current = { ...proposed }; onGeometryChange(proposed) } }}>
           <div><h3 className="text-sm font-medium">{embedded ? '动作循环' : '圆周排布'}</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">格数 = 独立帧数 × 重复次数。{material.kind === 'image' ? '这些参数描述原图的已有排布，不会重排或补帧，也不会自动识别动画。' : '内置示例会按此配置重新生成完整静态盘面。'}</p></div>
           <div className="grid max-w-xl grid-cols-3 gap-3">
             {(['slots', 'frames', 'repeats'] as const).map((key) => <div key={key} className="space-y-2"><Label htmlFor={`${idPrefix}-${key}`}>{key === 'slots' ? '圆周格数' : key === 'frames' ? '独立帧数' : '重复次数'}</Label><Input id={`${idPrefix}-${key}`} type="number" min={key === 'repeats' ? 1 : key === 'slots' ? 4 : 2} max={key === 'repeats' ? 90 : 180} step="1" value={geometryDraft[key]} onChange={(event) => setGeometryDraft((value) => ({ ...value, [key]: event.target.value }))} /></div>)}

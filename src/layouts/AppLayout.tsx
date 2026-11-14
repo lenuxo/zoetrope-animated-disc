@@ -23,7 +23,7 @@ export function AppLayout() {
   }
   return (
     <TooltipProvider delayDuration={300}>
-      <div className={`app-shell ${isWorkbench ? '' : 'content-shell'}`}>
+      <div className={`app-shell ${isWorkbench ? '' : 'content-shell studio-reading'}`}>
         <a href="#main-content" className="sr-only focus:not-sr-only focus:py-3">跳转到主要内容</a>
         <header className="flex h-14 shrink-0 items-center justify-between gap-6 border-b bg-card px-5">
           <NavLink to="/" className="flex items-center gap-3"><span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground"><Disc3 className="size-5" /></span><span className="text-base font-semibold tracking-tight">Zoetrope<span className="ml-2 hidden text-sm font-normal text-muted-foreground sm:inline">唱片实验室</span></span></NavLink>
